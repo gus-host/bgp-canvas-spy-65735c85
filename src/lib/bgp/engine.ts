@@ -198,7 +198,7 @@ export function runEngine(topo: Topology): EngineResult {
       // An advertisement that fails loop detection is an implicit withdraw of
       // whatever that peer previously advertised.
       if (!link.ibgp && msg.route.asPath.includes(receiver.asn)) {
-        emit({ tick, type: "status", node: msg.to, status: "withdrawn", payload: { reason: "as-path-loop" } });
+        emit({ tick, type: "status", node: msg.to, payload: { reason: "as-path-loop", peer: msg.from } });
         rin.delete(msg.from);
         dropped = true;
       } else if (link.ibgp && msg.route.originatorId === receiver.routerId) {

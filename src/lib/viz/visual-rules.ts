@@ -7,8 +7,10 @@ export const CANVAS_H = 800;
 /* ------------------------------------------------------------------ *
  * 2.2 Layout — closed-form, pure function of (tier, index_within_tier)
  * ------------------------------------------------------------------ */
-export const TIER_BASE_RADIUS = 150;
-export const TIER_RADIUS_STEP = 110;
+export const TIER_BASE_RADIUS = 130;
+export const TIER_RADIUS_STEP = 115;
+/** Fixed angular offset applied per tier so adjacent rings never align. */
+export const TIER_ANGLE_OFFSET = Math.PI / 7;
 
 export interface LayoutNode {
   routerId: string;
@@ -49,7 +51,8 @@ export function layoutNodes(
       );
       const r = TIER_BASE_RADIUS + TIER_RADIUS_STEP * tier;
       arr.forEach((n, i) => {
-        const theta = -Math.PI / 2 + (2 * Math.PI * i) / arr.length;
+        const theta =
+          -Math.PI / 2 + TIER_ANGLE_OFFSET * tier + (2 * Math.PI * i) / arr.length;
         out.push({
           ...n,
           indexInTier: i,
