@@ -71,8 +71,11 @@ function Index() {
     const map = new Map<string, { status: RouteStatus; route?: BgpRoute }>();
     for (const e of events) {
       if (e.tick > tick) break;
-      if (e.node && (e.type === "best" || e.type === "withdraw" || e.type === "status")) {
+      if (!e.node) continue;
+      if (e.type === "best" || e.type === "withdraw") {
         map.set(e.node, { status: e.status ?? "withdrawn", route: e.route });
+      } else if (e.type === "status" && e.status) {
+        map.set(e.node, { status: e.status, route: map.get(e.node)?.route });
       }
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
