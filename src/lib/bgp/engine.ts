@@ -230,7 +230,7 @@ export function runEngine(topo: Topology): EngineResult {
     }
 
     // Decision process over Adj-RIB-In.
-    let best: BgpRoute | null = null;
+    let best: BgpRoute | null = msg.to === topo.origin ? originRoute : null;
     for (const cand of [...rin.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       if (!best || betterRoute(cand[1], best)) best = cand[1];
     }
