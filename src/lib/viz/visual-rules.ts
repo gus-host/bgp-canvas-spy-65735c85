@@ -138,16 +138,18 @@ export interface PopAnim {
 
 export function beginPop(prev: PopAnim | undefined, tick: number): PopAnim {
   if (!prev) return { startTick: tick, blendOffset: 0 };
-  const current = popScale(tick - prev.startTick) + prev.blendOffset;
+  const current = currentPopScale(prev, tick);
   // Continue from the current interpolated scale rather than resetting to rest.
-  return { startTick: tick, blendOffset: current - popScale(0) };
+  const offset = current - popScale(0);
+  return { startTick: tick, blendOffset: Math.max(-0.6, Math.min(0.6, offset)) };
 }
 
 export function currentPopScale(a: PopAnim | undefined, tick: number): number {
   if (!a) return 1;
   const dt = tick - a.startTick;
   const decay = dt >= POP.durationTicks ? 0 : 1 - dt / POP.durationTicks;
-  return popScale(dt) + a.blendOffset * decay;
+  // Rendered scale is clamped so blended state can never invert the geometry.
+  return Math.max(0.05, popScale(dt) + a.blendOffset * decay);
 }
 
 export interface PulseAnim {
