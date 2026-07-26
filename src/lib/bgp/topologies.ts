@@ -22,24 +22,29 @@ function edge(
   return { from, to, localPref, mrai, ibgp };
 }
 
-/** 4-AS cyclic policy trap: each AS prefers the route through its neighbour. */
+/**
+ * BAD GADGET: AS65001 originates; the three satellites each prefer the path
+ * through one specific peer over their direct route, forming a preference
+ * cycle (2 prefers via 3, 3 via 4, 4 via 2) with no stable assignment.
+ */
 function badGadget(): Topology {
   const nodes = [
-    node(65001, "10.0.0.1", 0, { preferVia: 65002 }),
+    node(65001, "10.0.0.1", 0),
     node(65002, "10.0.0.2", 0, { preferVia: 65003 }),
     node(65003, "10.0.0.3", 0, { preferVia: 65004 }),
-    node(65004, "10.0.0.4", 0, { preferVia: 65001 }),
+    node(65004, "10.0.0.4", 0, { preferVia: 65002 }),
   ];
-  const edges: EdgeSpec[] = [
-    edge("10.0.0.1", "10.0.0.2", 200, 6),
-    edge("10.0.0.2", "10.0.0.1", 100, 6),
-    edge("10.0.0.2", "10.0.0.3", 200, 6),
-    edge("10.0.0.3", "10.0.0.2", 100, 6),
-    edge("10.0.0.3", "10.0.0.4", 200, 6),
-    edge("10.0.0.4", "10.0.0.3", 100, 6),
-    edge("10.0.0.4", "10.0.0.1", 200, 6),
-    edge("10.0.0.1", "10.0.0.4", 100, 6),
-  ];
+  const edges: EdgeSpec[] = [];
+  const link = (a: string, b: string, lp: number, mrai: number) => {
+    edges.push(edge(a, b, lp, mrai));
+    edges.push(edge(b, a, lp, mrai));
+  };
+  link("10.0.0.1", "10.0.0.2", 100, 6);
+  link("10.0.0.1", "10.0.0.3", 100, 6);
+  link("10.0.0.1", "10.0.0.4", 100, 6);
+  link("10.0.0.2", "10.0.0.3", 100, 6);
+  link("10.0.0.3", "10.0.0.4", 100, 6);
+  link("10.0.0.4", "10.0.0.2", 100, 6);
   return {
     name: "BAD GADGET",
     seed: 1,
@@ -50,7 +55,12 @@ function badGadget(): Topology {
   };
 }
 
-/** DISAGREE: conflicting policies in a mesh that still settles via timing. */
+/**
+ * DISAGREE: conflicting local preferences across a partial mesh, but the
+ * preference relation is globally acyclic (every router ranks peers by
+ * ascending Router ID), so the scheduler settles — the outcome depends on
+ * MRAI timing, not on the policies alone.
+ */
 function disagree(): Topology {
   const nodes = [
     node(65010, "10.1.0.4", 0),
@@ -60,12 +70,15 @@ function disagree(): Topology {
     node(65014, "10.1.0.5", 0),
   ];
   const ids = nodes.map((n) => n.routerId);
+  const ranked = [...ids].sort();
   const edges: EdgeSpec[] = [];
   for (let i = 0; i < ids.length; i++) {
     for (let j = i + 1; j < ids.length; j++) {
-      if ((i + j) % 3 === 0 && i !== 0) continue;
-      edges.push(edge(ids[i], ids[j], 100 + ((i * 7 + j) % 3) * 50, 5 + ((i + j) % 3)));
-      edges.push(edge(ids[j], ids[i], 100 + ((j * 5 + i) % 3) * 50, 5 + ((i + j) % 4)));
+      if ((i + j) % 4 === 3) continue;
+      // LOCAL_PREF from a globally consistent peer ranking -> acyclic.
+      const lpFor = (peer: string) => 300 - ranked.indexOf(peer) * 25;
+      edges.push(edge(ids[i], ids[j], lpFor(ids[i]), 5 + ((i + j) % 3)));
+      edges.push(edge(ids[j], ids[i], lpFor(ids[j]), 5 + ((i + j) % 4)));
     }
   }
   return {
