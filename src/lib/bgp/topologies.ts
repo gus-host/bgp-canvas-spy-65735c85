@@ -47,6 +47,7 @@ function badGadget(): Topology {
   link("10.0.0.4", "10.0.0.2", 100, 6);
   return {
     name: "BAD GADGET",
+    id: "BAD_GADGET",
     seed: 1,
     nodes,
     edges,
@@ -83,6 +84,7 @@ function disagree(): Topology {
   }
   return {
     name: "DISAGREE",
+    id: "DISAGREE",
     seed: 2,
     nodes,
     edges,
@@ -121,6 +123,7 @@ function ibgpRr(): Topology {
   ];
   return {
     name: "iBGP Route Reflector Clusters",
+    id: "IBGP_RR",
     seed: 3,
     nodes,
     edges,
@@ -168,6 +171,7 @@ export function randomTopology(seed: number): Topology {
   }
   return {
     name: `RANDOM-${seed}`,
+    id: `RANDOM-${seed}`,
     seed,
     nodes,
     edges,
