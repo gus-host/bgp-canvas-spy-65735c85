@@ -37,6 +37,8 @@ export interface EdgeSpec {
 
 export interface Topology {
   name: string;
+  /** Stable scenario identifier, e.g. "BAD_GADGET" or "RANDOM-42". */
+  id: string;
   seed: number;
   nodes: NodeSpec[];
   edges: EdgeSpec[];

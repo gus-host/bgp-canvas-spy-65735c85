@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { BgpCanvas } from "@/components/BgpCanvas";
 import { useNdjsonSimulation } from "@/hooks/use-ndjson-simulation";
 import { STATUS_COLORS } from "@/lib/viz/visual-rules";
+import { computeFrameState } from "@/lib/viz/frame-state";
 import type { BgpRoute, RouteStatus } from "@/lib/bgp/types";
 
 const TITLE = "BGP Convergence Visualizer — RFC 4271 Tick Engine";
@@ -67,6 +69,39 @@ function Index() {
       if (raf.current) cancelAnimationFrame(raf.current);
     };
   }, [playing, maxTick]);
+
+  // Deterministic debug hook consumed by the reference-capture harness.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const api = {
+      ready: events.length > 0 && !loading,
+      scenario,
+      seed,
+      maxTick,
+      eventCount: events.length,
+      seek(t: number) {
+        const clamped = Math.max(0, Math.min(Math.trunc(t), Math.max(maxTick, 0)));
+        flushSync(() => {
+          setPlaying(false);
+          setTick(clamped);
+        });
+        return clamped;
+      },
+      getFrameState(t?: number) {
+        return {
+          scenario,
+          seed,
+          ...computeFrameState(events, typeof t === "number" ? Math.trunc(t) : tick),
+        };
+      },
+      getEvents() {
+        return events;
+      },
+    };
+    (window as unknown as { __bgpViz: typeof api }).__bgpViz = api;
+  }, [events, loading, scenario, seed, tick, maxTick]);
+
+
 
   const converged = useMemo(
     () => events.find((e) => e.type === "converged" && e.tick <= tick),
