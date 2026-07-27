@@ -140,7 +140,9 @@ function Index() {
           <BgpCanvas events={events} tick={tick} />
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button
+              data-viz-playpause=""
               onClick={() => setPlaying((p) => !p)}
+
               className="rounded-md bg-primary px-4 py-2 font-mono text-xs font-semibold text-primary-foreground"
             >
               {playing ? "Pause" : "Play"}

@@ -31,10 +31,18 @@ await page.setViewport({ width: 1600, height: 1000, deviceScaleFactor: 1 });
 await page.goto(`${base}/?scenario=${scenario}`, { waitUntil: "networkidle0" });
 await page.waitForSelector("canvas[data-viz-canvas='bgp']");
 // Freeze playback; the scrubber drives ticks so capture is frame-exact.
-await page.evaluate(() => document.querySelector("button")?.click());
+await page.click("button[data-viz-playpause]");
+// Pin the canvas to its native 1200x800 so the capture region is exact.
+await page.evaluate(() => {
+  const c = document.querySelector("canvas[data-viz-canvas='bgp']");
+  c.style.width = "1200px";
+  c.style.height = "800px";
+  c.style.maxWidth = "none";
+});
 
 const canvas = await page.$("canvas[data-viz-canvas='bgp']");
 const index = { fps: 60, capture_region: { width: 1200, height: 800 }, frames: [] };
+
 
 for (let tick = 0; tick <= lastTick; tick++) {
   await page.evaluate((t) => {
