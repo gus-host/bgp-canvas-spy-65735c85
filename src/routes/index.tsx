@@ -70,6 +70,39 @@ function Index() {
     };
   }, [playing, maxTick]);
 
+  // Deterministic debug hook consumed by the reference-capture harness.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const api = {
+      ready: events.length > 0 && !loading,
+      scenario,
+      seed,
+      maxTick,
+      eventCount: events.length,
+      seek(t: number) {
+        const clamped = Math.max(0, Math.min(Math.trunc(t), Math.max(maxTick, 0)));
+        flushSync(() => {
+          setPlaying(false);
+          setTick(clamped);
+        });
+        return clamped;
+      },
+      getFrameState(t?: number) {
+        return {
+          scenario,
+          seed,
+          ...computeFrameState(events, typeof t === "number" ? Math.trunc(t) : tick),
+        };
+      },
+      getEvents() {
+        return events;
+      },
+    };
+    (window as unknown as { __bgpViz: typeof api }).__bgpViz = api;
+  }, [events, loading, scenario, seed, tick, maxTick]);
+
+
+
   const converged = useMemo(
     () => events.find((e) => e.type === "converged" && e.tick <= tick),
     [events, tick],
