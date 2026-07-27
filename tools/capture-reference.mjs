@@ -27,7 +27,7 @@ const browser = await puppeteer.launch({
   args: ["--force-device-scale-factor=1", "--hide-scrollbars"],
 });
 const page = await browser.newPage();
-await page.setViewport({ width: 1600, height: 1000, deviceScaleFactor: 1 });
+await page.setViewport({ width: 1700, height: 1200, deviceScaleFactor: 1 });
 await page.goto(`${base}/?scenario=${scenario}`, { waitUntil: "networkidle0" });
 await page.waitForSelector("canvas[data-viz-canvas='bgp']");
 // Freeze playback; the scrubber drives ticks so capture is frame-exact.
