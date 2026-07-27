@@ -1,53 +1,48 @@
-## Goal
+## What I verified in the current app
 
-Produce every fixture file your `tests/fixtures/` needs as a **downloadable bundle in chat only** — nothing added to the repo. Output goes to `/mnt/documents/bgp-task-fixtures/` plus a single zip.
+- `?scenario=<id>&seed=<n>` **is** honoured by the root route (`validateSearch` in `src/routes/index.tsx`), and held-out topologies are requested as `scenario=RANDOM&seed=<n>` — matching your capture script's query building.
+- `/api/simulate` and `/api/public/simulate` stream NDJSON with the exact headers your script records. GET/POST/OPTIONS exist on `/api/simulate`; GET/POST on the public alias.
+- **Assumption 1 is only half true.** The stream does end with a `converged` event, but its payload today is `{ oscillationDetected, tickBoundary, cycleProfile, localRib }` — not the `{scenario_id, node_count, edge_count, oscillation_detected, final_tick, event_count, local_rib, oscillation_profile}` shape instruction.md requires. Also `oscillation` events are emitted mid-stream, never as the terminal event, so the "converged **or** oscillation" fallback never fires.
+- **Assumption 3 is false.** `window.__bgpViz` does not exist anywhere in the codebase — the harness would hang on `waitForFunction`.
+- Canvas is a single `<canvas>` pinned to 1200x800, so assumption on `document.querySelector('canvas')` holds.
 
-## What gets generated
+## Work items
 
-All values are computed by running the existing engine/layout code once (headless, via a throwaway script under `/tmp`) and freezing the output to static JSON — the verifier never executes engine code.
+### 1. Generate `scenario.json` for the three named scenarios (download only)
+Derived directly from `src/lib/bgp/topologies.ts` — not hand-written — by running the real `getTopology()` and serialising it, so it cannot drift from the engine that produced `oracle_ribs/*.json`. Each file contains:
 
 ```text
-bgp-task-fixtures/
-  ground_truth_params.json        pop {A,zeta,omega,phi,durationTicks},
-                                  pulse bezier tuple + duration, stagger=8,
-                                  tier radii 130/115, angle offset PI/7, canvas 1200x800
-  status_colors.json              exact STATUS_COLORS map from visual-rules.ts
-  transport_contract.json         exact /api/simulate headers + method list
-  holdout_seeds.json              6 fixed seeds, each labelled oscillating|convergent
-  sample_ticks.json               per scenario: arrival / pulse / stagger /
-                                  interruption tick picks, each with the seq it came from
-  oracle_ribs/{BAD_GADGET,DISAGREE,IBGP_RR,RANDOM-<seed> x6}.json
-                                  final local-RIB per router + converged payload
-                                  + oscillation_profile (when oscillating)
-  oscillation_profiles/BAD_GADGET.json (+ oscillating holdouts)
-  causal_order/{scenario}.json    required (seq_before, seq_after) precedence pairs
-                                  extracted from the event trace
-  expected_positions/{scenario}.json   {routerId: {x,y,tier,indexInTier}} from layoutNodes()
-  pop_fit_sample.json             one (scenario, node, arrival tick) triple
-  stagger_fit_sample.json         one (scenario, sender, ranked edge list, ticks) triple
-  interruption_sample.json        one (scenario, edge, interrupting tick) triple
-  events/{scenario}.ndjson        full trace, so you can cross-check my tick picks
-  reference_frames/{scenario}/{tick}.png   6 ticks per scenario, 1200x800 crops
+scenario_id, display_name, seed, prefix, origin_router
+nodes[]  : routerId, asn, tier, reflector, cluster, prefer_via
+edges[]  : from, to, ibgp, local_pref, mrai
+policy   : med defaults, prepend rules, RR tier/cluster map
+generator_rules : the exact RANDOM-<seed> contract read out of
+                  randomTopology() — LCG (1664525/1013904223 mod 2^32),
+                  draw order, node count 4..12, tier assignment,
+                  ASN formula, routerId template, spanning-tree edge
+                  pass, extra-edge pass, origin = last node
 ```
+A `generator_rules` self-check runs the documented rules in isolation against `randomTopology(seed)` for all six holdout seeds and confirms byte-identical topologies before delivery.
 
-## How each piece is produced
+### 2. Generate `expected_status_by_tick/<SCENARIO>.json` (download only)
+`{tick: {routerId: status}}` per named scenario, built by replaying the real event trace with the same status-folding rule the UI uses (`best`/`withdraw` set status+route; `status` events overwrite status), emitted at every tick where any router's status changes, plus tick 0 and the final tick. Statuses use the five canonical values that key `STATUS_COLORS`.
 
-1. **Engine oracles** — a Node/tsx script imports `getTopology` + `runEngine` for the 3 named scenarios and the 6 holdout seeds, writes `events/*.ndjson` and the final `converged` payload (`localRib`, `oscillationDetected`, `cycleProfile`) into `oracle_ribs/`.
-2. **Causal order** — derived from the same traces: for each `best`/`update` event, the pairs `(update.seq -> resulting best.seq)` and `(best.seq -> downstream update.seq)` that any correct re-implementation must preserve.
-3. **Positions** — call `layoutNodes()` on each scenario's meta node list; round to 6 decimals.
-4. **Sample ticks** — chosen programmatically: first `node` arrival for pop; a `best` event with ≥2 outgoing edges for stagger (rank 0/1/2 tick offsets recorded); an edge that receives a second `update` while a prior pulse is still within its 30-tick window for interruption.
-5. **Reference frames** — dev server on :8080 + Playwright (Chromium, already in the sandbox) drives the existing scrubber the same way `tools/capture-reference.mjs` does, screenshotting the pinned 1200x800 canvas at exactly the ticks in `sample_ticks.json`, per scenario, with `?scenario=` honoured (already fixed).
+### 3. Add the `window.__bgpViz` debug hook (repo change, required by instruction.md)
+In `src/routes/index.tsx`, expose on mount:
+- `__bgpViz.seek(tick)` — pauses playback and sets the tick synchronously enough for the harness (returns after a flush).
+- `__bgpViz.getFrameState(tick)` — pure computation from the loaded events + `visual-rules.ts`: per-node `{x, y, tier, indexInTier, status, color, popScale}` and per-edge in-flight `{from, to, progress, color, edgeRank}`, plus `{tick, scenario, seed, converged, oscillating}`.
+- `__bgpViz.ready` / `__bgpViz.maxTick` so the harness can wait properly.
 
-## Defaults I'm committing to (say now if you want different)
+Read-only and deterministic; no change to engine or rendering behaviour.
 
-- Holdout seeds: `[7, 19, 23, 41, 58, 77]`, each labelled after the run.
-- 6 reference frames per scenario (arrival, mid-pulse, stagger spread, interruption, oscillation/convergence, final).
-- Transport contract recorded verbatim: `Content-Type: application/x-ndjson`, `Transfer-Encoding: chunked`, `Cache-Control: no-store, no-transform`, `X-Accel-Buffering: no`, `Access-Control-Allow-Origin: *`; GET/POST/OPTIONS on `/api/simulate`, GET/POST on `/api/public/simulate`.
+### 4. Align the terminal-event contract
+Extend the engine's final `converged` event payload with the instruction.md keys (`scenario_id`, `node_count`, `edge_count`, `oscillation_detected`, `final_tick`, `event_count`, `local_rib`, `oscillation_profile`) while keeping the existing keys for backwards compatibility with fixtures already shipped. Then `capture_outputs.mjs` assumption 1 becomes literally true and its payload write needs no edits.
+
+### 5. Reconciled `capture_outputs.mjs`
+Ship a corrected copy in the bundle with the assumption block rewritten to match reality: terminal event is always `converged` (oscillation is a mid-stream marker mirrored into the payload), `scenario=RANDOM&seed=<n>` for holdouts, `__bgpViz` contract as implemented, and `holdout_seeds.json` read as `{seeds:[...]}`— I'll confirm the shipped file's actual key and match it.
 
 ## Verification before delivery
-
-Every generated PNG is inspected (no blank/clipped frames, correct topology per scenario — the DISAGREE/IBGP mismatch you hit is exactly what I re-check), and each JSON is re-read and key-shape-summarised in my reply so you can lock `test_outputs.py` to real key names.
+Run the harness end-to-end against the dev server: confirm every scenario writes a payload with the full key set, `__bgpViz.getFrameState` returns non-empty node maps at each sample tick, frames are 1200x800 and non-blank, and `expected_status_by_tick` agrees with the colors sampled from those frames.
 
 ## Repo impact
-
-None. Only `/tmp` scratch and `/mnt/documents` artifacts; no project files created or modified.
+Only items 3 and 4 touch the repo (`src/routes/index.tsx`, `src/lib/bgp/engine.ts`). All fixtures go to `/mnt/documents/bgp-task-fixtures-v2/` plus a zip — nothing added to project files.
