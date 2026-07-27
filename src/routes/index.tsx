@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { BgpCanvas } from "@/components/BgpCanvas";
 import { useNdjsonSimulation } from "@/hooks/use-ndjson-simulation";
 import { STATUS_COLORS } from "@/lib/viz/visual-rules";
+import { computeFrameState } from "@/lib/viz/frame-state";
 import type { BgpRoute, RouteStatus } from "@/lib/bgp/types";
 
 const TITLE = "BGP Convergence Visualizer — RFC 4271 Tick Engine";
