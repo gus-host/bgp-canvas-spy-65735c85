@@ -38,6 +38,11 @@ await page.evaluate(() => {
   c.style.width = "1200px";
   c.style.height = "800px";
   c.style.maxWidth = "none";
+  // Hide surrounding chrome so nothing bleeds into the graded capture region.
+  document.querySelectorAll("aside, header").forEach((el) => {
+    el.style.display = "none";
+  });
+
 });
 
 const canvas = await page.$("canvas[data-viz-canvas='bgp']");
