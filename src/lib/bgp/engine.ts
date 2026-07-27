@@ -284,16 +284,27 @@ export function runEngine(topo: Topology): EngineResult {
     }
   }
 
+  const sortedRib = Object.fromEntries(
+    [...localRib.entries()].sort((a, b) => a[0].localeCompare(b[0])),
+  );
   emit({
     tick: tick + 2,
     type: "converged",
     payload: {
+      // Legacy keys (kept for already-shipped fixtures).
       oscillationDetected: oscillation,
       tickBoundary: ENGINE_TICK_LIMIT,
       cycleProfile,
-      localRib: Object.fromEntries(
-        [...localRib.entries()].sort((a, b) => a[0].localeCompare(b[0])),
-      ),
+      localRib: sortedRib,
+      // Canonical grading contract.
+      scenario_id: topo.id,
+      node_count: topo.nodes.length,
+      edge_count: topo.edges.length,
+      oscillation_detected: oscillation,
+      final_tick: tick + 2,
+      event_count: events.length + 1,
+      local_rib: sortedRib,
+      oscillation_profile: oscillation ? cycleProfile : null,
     },
   });
 
