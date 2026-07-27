@@ -10,6 +10,13 @@ const DESC =
   "Deterministic RFC 4271 BGP simulation streamed as chunked NDJSON and rendered on canvas: BAD GADGET, DISAGREE and iBGP route-reflector convergence, tick by tick.";
 
 export const Route = createFileRoute("/")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    scenario:
+      typeof search.scenario === "string" && search.scenario ? search.scenario : undefined,
+    seed: search.seed != null && !Number.isNaN(Number(search.seed))
+      ? Number(search.seed)
+      : undefined,
+  }),
   head: () => ({
     meta: [
       { title: TITLE },
@@ -31,8 +38,11 @@ const SCENARIOS = [
 ];
 
 function Index() {
-  const [scenario, setScenario] = useState("BAD_GADGET");
-  const [seed, setSeed] = useState(7);
+  const search = Route.useSearch();
+  // URL params drive the reference-capture harness; UI buttons override them.
+  const [scenario, setScenario] = useState(search.scenario ?? "BAD_GADGET");
+  const [seed, setSeed] = useState(search.seed ?? 7);
+
   const [tick, setTick] = useState(0);
   const [playing, setPlaying] = useState(true);
   const { events, loading, error, reload } = useNdjsonSimulation(scenario, seed);
@@ -130,7 +140,9 @@ function Index() {
           <BgpCanvas events={events} tick={tick} />
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button
+              data-viz-playpause=""
               onClick={() => setPlaying((p) => !p)}
+
               className="rounded-md bg-primary px-4 py-2 font-mono text-xs font-semibold text-primary-foreground"
             >
               {playing ? "Pause" : "Play"}
