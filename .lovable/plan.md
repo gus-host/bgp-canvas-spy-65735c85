@@ -1,54 +1,89 @@
-## What's actually failing
 
-`capture_outputs.mjs` gets `<!DOCTYPE html>` back from `/api/public/simulate`, so `JSON.parse` on the first NDJSON line throws.
+# Re-scoping `dynamo/bgp-visual-rules` to a 1–3 hour task
 
-Cause (confirmed from the build log + config):
-- The build ends in `[nitro] (preset: cloudflare-module)` and emits a Cloudflare **Worker** at `.output/server/index.mjs` + `wrangler.json`.
-- `npm run preview` is plain `vite preview`, which only serves the **static client assets** in `.output/public`. There is no server runtime, so every unknown path — including `/api/public/simulate` — falls through to `index.html`. That's the HTML the script parsed.
-- The readiness loop hides this: it only checks `statusCode < 500`, and the HTML fallback returns 200.
+## What the review actually says
 
-Nothing is wrong with the engine, the routes, or `window.__bgpViz`. Only the way the app is served in `solve.sh`.
+Both trials failed for the same reason: the agents spent their hour on **measurement logistics** (ffmpeg extraction, peak detection, guessing) and never got to honest fitting. Nothing about the grading or the golden values is wrong — six correct answers exist, tolerances are generous relative to the errors (10–70x over tol), and no test is flaky.
 
-## Fix
+So the fix is not "make it easier to be right", it is **"remove the hours that aren't the crux"**: video decoding, frame selection, finding where a status is even visible, and guessing which functional family each curve belongs to. What stays hard: recovering the exact constants, the per-tier angle offset, the integer stagger, and continue-not-reset blending.
 
-Build for a Node target and run the real nitro server instead of `vite preview`.
+Golden parameters, expected fixture values, and the verifier's numeric checks stay **byte-identical** — so no re-validation of ground truth is needed.
 
-In `solve.sh`, replace the build + preview block with:
+## Changes
 
-```bash
-NITRO_PRESET=node-server npm run build
+### 1. Ship pre-extracted, labeled frames (biggest time saver)
 
-PORT=8080 nohup node .output/server/index.mjs > /tmp/app.log 2>&1 &
-```
+Add to `environment/data/<SCENARIO>/`:
 
-`@lovable.dev/vite-tanstack-config` sets nitro's `defaultPreset: "cloudflare-module"`, which `NITRO_PRESET` overrides — so no config file change is needed and no wrangler/network is required. `node-server` output is a self-contained Node server honoring `PORT`, and it serves the TanStack server routes (`/api/simulate`, `/api/public/simulate`) plus SSR.
+- `frames/tick_%06d.png` — a curated subset, not every tick:
+  - **settled frames** (well after all pops finish) for each scenario — the frames positions must be measured from;
+  - **one dense pop window**: every tick 0..48 after a single named arrival;
+  - **one dense pulse window**: every tick 0..30 of a single named edge traversal;
+  - **one interruption window** covering the prior pulse + the interrupting pulse.
+- `measurement_index.json` — names those windows explicitly:
+  ```json
+  {
+    "settled_ticks": {"BAD_GADGET": 520, "DISAGREE": 300, "IBGP_RR": 340},
+    "pop_window":   {"scenario": "...", "routerId": "...", "arrival_tick": N, "ticks": [...]},
+    "pulse_window": {"scenario": "...", "edge": ["...","..."], "start_tick": N, "ticks": [...]},
+    "interrupt_window": {"scenario": "...", "edge": [...], "prior_start_tick": 21, "interrupt_tick": 38}
+  }
+  ```
 
-## Harden the readiness probe
+This directly kills failure modes 1 and 6 from the review (sampling during pop overshoot; not knowing which frames are stable) without revealing a single numeric answer.
 
-Make the wait loop assert the endpoint really returns NDJSON, so a static-HTML regression fails loudly instead of surfacing as a JSON parse error 4 minutes later:
+`video.mp4` stays for context but is no longer required; instruction says the frames are the canonical measurement surface. BAD_GADGET's capture is truncated to the first ~600 ticks (its 1418-event oscillating tail adds runtime, not signal).
 
-```bash
-node -e "
-  const http = require('http');
-  const req = http.get('http://localhost:8080/api/public/simulate?scenario=BAD_GADGET&rate_ms=0', res => {
-    const ct = res.headers['content-type'] || '';
-    process.exit(res.statusCode === 200 && ct.includes('ndjson') ? 0 : 1);
-  });
-  req.on('error', () => process.exit(1));
-  req.setTimeout(2000, () => { req.destroy(); process.exit(1); });
-"
-```
+### 2. Labeled color probes instead of colour hunting
 
-and after the loop, exit non-zero with `cat /tmp/app.log` if it never became ready.
+Add `environment/data/color_probes.json`: for each of the five statuses, a `(scenario, tick, routerId)` triple where that status is on screen in a supplied settled frame. The agent still has to compute the node's position and sample the pixel — but no longer has to hunt three videos for where `rr-relay-only` ever appears. Instruction gains one hard line: *"every colour must be pixel-sampled; semantically plausible colours will not match."* This kills failure mode 2, which cost both agents an entire test for zero conceptual reason.
 
-## Alternative (if you'd rather not change the build target)
+### 3. Disclose functional *forms*, never constants
 
-`npm run dev -- --port 8080` also serves the API routes correctly and skips the ~7-minute production build entirely. Downside: it's the dev pipeline, not the artifact the task nominally grades. Use it only if the oracle's runtime budget is tight.
+`instruction.md` gains a "Model forms" section:
 
-## Optional repo change
+- layout: `r = a + b*tier`, `theta = theta0 + c*tier + 2*PI*i/n`, `(x, y) = (600, 400) + r*(cos, sin)` — `a`, `b`, `c`, `theta0`, and the within-tier sort key are for the agent to recover;
+- pop: `scale(t) = 1 + A*exp(-zeta*omega*t)*cos(omega*sqrt(1-zeta^2)*t + phi)`, finite duration then rest — `A`, `zeta`, `omega`, `phi`, duration unknown;
+- pulse: a single cubic-Bezier easing `(x1,y1,x2,y2)` over a fixed tick duration, **not** a CSS preset;
+- stagger: exact non-negative integer, linear in `edgeRank`;
+- interruption: continue-not-reset composition of the same easing.
 
-Add a `"start": "node .output/server/index.mjs"` script so `solve.sh` doesn't hardcode the output path. I can add that if you want it in the project; otherwise this plan is purely edits to your `solve.sh`, which lives outside this repo.
+This converts an open-ended "what family is this?" search into a **parameter-fitting** job — the part the review found genuinely discriminating (both agents were 12–70x over tolerance on the constants even when they knew the shape). It is the main lever taking expert time from 18h to ~2h.
 
-## Note on capture timing
+### 4. Point the stagger at the data
 
-Once the API returns real NDJSON, `capture_outputs.mjs` will proceed to the Puppeteer phase. If anything fails there it'll be a separate issue (`window.__bgpViz.ready` gating) — the current traceback stops well before that.
+Instruction states explicitly that `events.ndjson` fan-out events carry an `edgeRank` and share a causal tick origin, so the delay is measurable as a tick difference rather than guessed (both agents guessed: 3 and 1 vs golden 8).
+
+### 5. task.toml
+
+- `expert_time_estimate_hours = 18` -> `3`
+- rewrite `difficulty_explanation` to claim precision-of-fit and cross-topology generalization (the true crux) rather than "must discover the functional family"
+- rewrite `solution_explanation` to describe the shortened measurement path
+- `verification_explanation` unchanged in substance (static diff against frozen fixtures)
+- `[agent] timeout_sec = 3600` unchanged; `[environment] build_timeout_sec` unchanged — image only gains a few hundred small PNGs, and no build step runs in it.
+
+### 6. Tolerances
+
+Unchanged: `position_px = 1.5`, `scale = 0.02`, `progress = 0.02`, colour exact. The review explicitly found tolerances are not doing the discriminating work, and an honest fit lands well inside them.
+
+## Files changed
+
+| File | Change |
+| --- | --- |
+| `task/instruction.md` | rewrite: frames-first measurement surface, model-form section, colour-probe pointer, stagger-from-events pointer |
+| `task/environment/data/<SCENARIO>/frames/*.png` | new curated frame sets |
+| `task/environment/data/<SCENARIO>/measurement_index.json` | new |
+| `task/environment/data/color_probes.json` | new |
+| `task/environment/data/BAD_GADGET/{video.mp4,events.ndjson,tick_index.json}` | truncated to first ~600 ticks |
+| `task/environment/Dockerfile` | unchanged apart from comment noting the frames payload |
+| `task/task.toml` | time estimate + difficulty/solution explanations |
+| `task/tests/**` | **unchanged** (verifier + fixtures stay as-is) |
+| `task/solution/**` | `solve.sh` / `visual-rules.mjs` / `dump_evaluations.mjs` unchanged; oracle still passes |
+
+## How the frames get produced
+
+Regenerated in this repo from the existing engine + canvas (`src/lib/bgp/engine.ts`, `src/components/BgpCanvas.tsx`, `window.__bgpViz.seek`) with the existing Playwright/Puppeteer capture path, so every frame is pixel-identical to the videos already shipped and to the golden fixture values.
+
+## Delivery
+
+Rebuild the full `dynamo-1a40bbc-software-engineering/task/` tree with these edits (git metadata and `jobs/` excluded) and hand back a downloadable `bgp-visual-rules-task-v3.zip`, plus a written summary of every file changed and why, mapped back to the review's numbered failure modes.
